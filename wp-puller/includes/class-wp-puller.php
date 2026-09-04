@@ -46,9 +46,9 @@ final class WP_Puller {
     public $webhook = null;
 
     /**
-     * Theme updater instance.
+     * Package updater instance.
      *
-     * @var WP_Puller_Theme_Updater
+     * @var WP_Puller_Updater
      */
     public $updater = null;
 
@@ -104,7 +104,7 @@ final class WP_Puller {
         require_once WP_PULLER_PLUGIN_DIR . 'includes/class-client-ip.php';
         require_once WP_PULLER_PLUGIN_DIR . 'includes/class-github-api.php';
         require_once WP_PULLER_PLUGIN_DIR . 'includes/class-backup.php';
-        require_once WP_PULLER_PLUGIN_DIR . 'includes/class-theme-updater.php';
+        require_once WP_PULLER_PLUGIN_DIR . 'includes/class-updater.php';
         require_once WP_PULLER_PLUGIN_DIR . 'includes/class-webhook-handler.php';
 
         if ( is_admin() ) {
@@ -148,8 +148,8 @@ final class WP_Puller {
         $this->logger     = new WP_Puller_Logger();
         $this->github_api = new WP_Puller_GitHub_API();
         $this->backup     = new WP_Puller_Backup();
-        $this->updater    = new WP_Puller_Theme_Updater( $this->github_api, $this->backup, $this->logger );
-        $this->webhook    = new WP_Puller_Webhook_Handler( $this->updater, $this->logger );
+        $this->updater    = new WP_Puller_Updater( $this->github_api, $this->backup, $this->logger );
+        $this->webhook    = new WP_Puller_Webhook_Handler( $this->updater, $this->logger, $this->github_api );
 
         if ( is_admin() ) {
             $this->admin = new WP_Puller_Admin( $this->github_api, $this->updater, $this->backup, $this->logger );
@@ -290,5 +290,124 @@ final class WP_Puller {
         }
 
         return $key;
+    }
+
+    /**
+     * Fill in defaults for a package configuration array.
+     *
+     * @param array $pkg Package configuration.
+     * @return array
+     */
+    public static function normalize_package( $pkg ) {
+        return wp_parse_args( (array) $pkg, array(
+            'id'            => '',
+            'label'         => '',
+            'repo_url'      => '',
+            'branch'        => 'main',
+            'package_type'  => 'plugin',
+            'source_path'   => '',
+            'plugin_slug'   => '',
+            'package_kind'  => 'dir',
+            'auto_update'   => true,
+            'token_mode'    => 'global',
+            'pat'           => '',
+            'webhook_mode'  => 'global',
+            'webhook_secret' => '',
+            'latest_commit' => '',
+            'last_check'    => 0,
+        ) );
+    }
+
+    /**
+     * Get all configured packages.
+     *
+     * @return array
+     */
+    public static function get_packages() {
+        $packages = get_option( 'wp_puller_packages', array() );
+
+        if ( ! is_array( $packages ) ) {
+            $packages = array();
+        }
+
+        return array_map( array( __CLASS__, 'normalize_package' ), $packages );
+    }
+
+    /**
+     * Save the packages array, assigning ids to any package missing one.
+     *
+     * @param array $packages Package configurations.
+     * @return array The saved (normalized) packages.
+     */
+    public static function save_packages( $packages ) {
+        $clean = array();
+
+        foreach ( (array) $packages as $pkg ) {
+            $pkg = self::normalize_package( $pkg );
+
+            if ( empty( $pkg['id'] ) ) {
+                $pkg['id'] = 'pkg_' . substr( md5( uniqid( '', true ) ), 0, 12 );
+            }
+
+            $clean[] = $pkg;
+        }
+
+        update_option( 'wp_puller_packages', $clean );
+
+        return $clean;
+    }
+
+    /**
+     * Get a single package by id.
+     *
+     * @param string $id Package id.
+     * @return array|null
+     */
+    public static function get_package( $id ) {
+        foreach ( self::get_packages() as $pkg ) {
+            if ( isset( $pkg['id'] ) && $pkg['id'] === $id ) {
+                return $pkg;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Resolve the effective GitHub token for a package.
+     *
+     * Uses the package's custom token when its token_mode is 'custom',
+     * otherwise the global token.
+     *
+     * @param array $pkg Package configuration.
+     * @return string
+     */
+    public static function get_package_token( $pkg ) {
+        if ( ! empty( $pkg ) && ! empty( $pkg['token_mode'] ) && 'custom' === $pkg['token_mode'] && ! empty( $pkg['pat'] ) ) {
+            return self::decrypt( $pkg['pat'] );
+        }
+
+        $encrypted = get_option( 'wp_puller_global_pat', '' );
+
+        return $encrypted ? self::decrypt( $encrypted ) : '';
+    }
+
+    /**
+     * Resolve the effective webhook secret for a package.
+     *
+     * Uses the package's custom secret when its webhook_mode is 'custom',
+     * otherwise the global webhook secret.
+     *
+     * @param array $pkg Package configuration.
+     * @return string
+     */
+    public static function get_effective_webhook_secret( $pkg ) {
+        if ( ! empty( $pkg ) && ! empty( $pkg['webhook_mode'] ) && 'custom' === $pkg['webhook_mode'] && ! empty( $pkg['webhook_secret'] ) ) {
+            return self::decrypt( $pkg['webhook_secret'] );
+        }
+
+        $encrypted = get_option( 'wp_puller_webhook_secret', '' );
+
+        return $encrypted ? self::decrypt( $encrypted ) : '';
     }
 }

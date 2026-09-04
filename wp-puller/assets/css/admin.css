@@ -618,3 +618,184 @@
         align-self: flex-end;
     }
 }
+
+/* Collapsible package form (works without JS via native <details>) */
+.wp-puller-pkg-details {
+    border: 1px solid #c3c4c7;
+    border-radius: 4px;
+    background: #fff;
+    margin-bottom: 16px;
+    overflow: hidden;
+}
+
+.wp-puller-pkg-details > summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: #1d2327;
+    padding: 12px 16px;
+    background: #f6f7f7;
+    list-style: none;
+}
+
+.wp-puller-pkg-details > summary::-webkit-details-marker {
+    display: none;
+}
+
+.wp-puller-pkg-details > summary::before {
+    content: "\25B8";
+    display: inline-block;
+    margin-right: 8px;
+    transition: transform 0.15s ease;
+}
+
+.wp-puller-pkg-details[open] > summary::before {
+    transform: rotate(90deg);
+}
+
+.wp-puller-pkg-details[open] > summary {
+    border-bottom: 1px solid #f0f0f1;
+}
+
+.wp-puller-pkg-details > form {
+    padding: 16px;
+}
+
+/* Inline action forms */
+.wp-puller-package-actions form,
+.wp-puller-backup-actions form {
+    display: inline-block;
+    margin: 0 4px 6px 0;
+    vertical-align: middle;
+}
+
+.wp-puller-package-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+    margin-top: 8px;
+}
+
+.wp-puller-package-backups {
+    margin-top: 12px;
+    padding: 12px 14px;
+    background: #f6f7f7;
+    border: 1px solid #e2e4e7;
+    border-radius: 4px;
+}
+
+.wp-puller-webhook-field .wp-puller-copy-field input {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+.wp-puller-commit-msg {
+    color: #646970;
+    font-style: italic;
+    max-width: 100%;
+    display: inline-block;
+}
+
+/* Packages Card */
+.wp-puller-card-packages {
+    grid-column: span 2;
+}
+
+@media (max-width: 1024px) {
+    .wp-puller-card-packages {
+        grid-column: span 1;
+    }
+}
+
+.wp-puller-package-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.wp-puller-package-item {
+    padding: 14px 0;
+    border-bottom: 1px solid #f0f0f1;
+}
+
+.wp-puller-package-item:first-child {
+    padding-top: 0;
+}
+
+.wp-puller-package-item:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.wp-puller-package-main {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.wp-puller-package-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.wp-puller-package-title strong {
+    font-size: 14px;
+    color: #1d2327;
+}
+
+.wp-puller-package-meta {
+    font-size: 12px;
+    color: #787c82;
+    word-break: break-all;
+}
+
+.wp-puller-package-meta code {
+    background: #f0f0f1;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 11px;
+}
+
+.wp-puller-package-actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.wp-puller-package-actions .button {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.wp-puller-package-actions .button .dashicons {
+    font-size: 15px;
+    width: 15px;
+    height: 15px;
+    line-height: 15px;
+}
+
+.wp-puller-package-backups {
+    margin-top: 12px;
+    padding: 12px;
+    background: #f6f7f7;
+    border-radius: 4px;
+}
+
+.wp-puller-badge-info {
+    background: #e5f0fb;
+    color: #135e96;
+}
+
+#wp-puller-package-panel {
+    margin-bottom: 20px;
+    padding: 16px;
+    background: #f6f7f7;
+    border: 1px solid #dcdcde;
+    border-radius: 4px;
+}
+
+.wp-puller-pkg-form .description.pkg-test-result {
+    min-height: 16px;
+    font-size: 12px;
+}

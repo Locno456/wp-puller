@@ -10,15 +10,14 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-$status       = $data['status'];
-$theme_info   = $data['theme_info'];
-$webhook_info = $data['webhook_info'];
-$backups      = $data['backups'];
-$logs         = $data['logs'];
-$backup_class = $data['backup_class'];
-$masked_pat   = WP_Puller_Admin::get_masked_pat();
-$pat_status   = WP_Puller_Admin::get_pat_status();
+$packages      = $package_views; // array of views built in render_admin_page()
+$webhook_info  = $webhook_info;
+$logs          = $logs;
+$global_pat    = $global_pat;
+$global_status = $global_status;
+$backup_count  = $backup_count;
 ?>
+
 <div class="wrap wp-puller-wrap">
     <h1 class="wp-puller-title">
         <span class="dashicons dashicons-update"></span>
@@ -28,243 +27,181 @@ $pat_status   = WP_Puller_Admin::get_pat_status();
 
     <div class="wp-puller-notice" id="wp-puller-notice" style="display: none;"></div>
 
+    <?php if ( ! empty( $flash ) ) : ?>
+        <div class="wp-puller-notice notice-<?php echo esc_attr( $flash['type'] ); ?>" style="display:block;"><?php echo esc_html( $flash['message'] ); ?></div>
+    <?php elseif ( ! empty( $_GET['wp_puller_msg'] ) ) : ?>
+        <div class="wp-puller-notice notice-success" style="display:block;"><?php echo esc_html( wp_unslash( $_GET['wp_puller_msg'] ) ); ?></div>
+    <?php elseif ( ! empty( $_GET['wp_puller_err'] ) ) : ?>
+        <div class="wp-puller-notice notice-error" style="display:block;"><?php echo esc_html( wp_unslash( $_GET['wp_puller_err'] ) ); ?></div>
+    <?php endif; ?>
+
     <div class="wp-puller-grid">
-        <!-- Status Card -->
-        <div class="wp-puller-card wp-puller-card-status">
+
+        <!-- Global Settings Card -->
+        <div class="wp-puller-card wp-puller-card-global">
             <div class="wp-puller-card-header">
-                <h2><?php esc_html_e( 'Status', 'wp-puller' ); ?></h2>
-                <?php if ( $status['is_configured'] ) : ?>
-                    <span class="wp-puller-badge wp-puller-badge-success"><?php esc_html_e( 'Connected', 'wp-puller' ); ?></span>
-                <?php else : ?>
-                    <span class="wp-puller-badge wp-puller-badge-warning"><?php esc_html_e( 'Not Configured', 'wp-puller' ); ?></span>
-                <?php endif; ?>
+                <h2><?php esc_html_e( 'Global Settings', 'wp-puller' ); ?></h2>
             </div>
             <div class="wp-puller-card-body">
-                <div class="wp-puller-status-grid">
-                    <div class="wp-puller-status-item">
-                        <span class="wp-puller-status-label"><?php esc_html_e( 'Active Theme', 'wp-puller' ); ?></span>
-                        <span class="wp-puller-status-value"><?php echo esc_html( $theme_info['name'] ); ?></span>
-                    </div>
-                    <div class="wp-puller-status-item">
-                        <span class="wp-puller-status-label"><?php esc_html_e( 'Theme Version', 'wp-puller' ); ?></span>
-                        <span class="wp-puller-status-value"><?php echo esc_html( $theme_info['version'] ?: '-' ); ?></span>
-                    </div>
-                    <div class="wp-puller-status-item">
-                        <span class="wp-puller-status-label"><?php esc_html_e( 'Current Commit', 'wp-puller' ); ?></span>
-                        <span class="wp-puller-status-value wp-puller-mono" id="current-commit">
-                            <?php echo $status['short_commit'] ? esc_html( $status['short_commit'] ) : '-'; ?>
-                        </span>
-                    </div>
-                    <div class="wp-puller-status-item">
-                        <span class="wp-puller-status-label"><?php esc_html_e( 'Last Check', 'wp-puller' ); ?></span>
-                        <span class="wp-puller-status-value" id="last-check">
-                            <?php
-                            if ( $status['last_check'] ) {
-                                echo esc_html( human_time_diff( $status['last_check'], time() ) . ' ' . __( 'ago', 'wp-puller' ) );
-                            } else {
-                                echo '-';
-                            }
-                            ?>
-                        </span>
-                    </div>
-                </div>
-
-                <div class="wp-puller-actions">
-                    <button type="button" class="button" id="wp-puller-check-updates" <?php disabled( ! $status['is_configured'] ); ?>>
-                        <span class="dashicons dashicons-search"></span>
-                        <?php esc_html_e( 'Check for Updates', 'wp-puller' ); ?>
-                    </button>
-                    <button type="button" class="button button-primary" id="wp-puller-update-now" <?php disabled( ! $status['is_configured'] ); ?>>
-                        <span class="dashicons dashicons-download"></span>
-                        <?php esc_html_e( 'Update Now', 'wp-puller' ); ?>
-                    </button>
-                </div>
-
-                <div class="wp-puller-update-result" id="wp-puller-update-result" style="display: none;"></div>
-            </div>
-        </div>
-
-        <!-- Settings Card -->
-        <div class="wp-puller-card wp-puller-card-settings">
-            <div class="wp-puller-card-header">
-                <h2><?php esc_html_e( 'GitHub Repository', 'wp-puller' ); ?></h2>
-            </div>
-            <div class="wp-puller-card-body">
-                <form id="wp-puller-settings-form">
+                <form id="wp-puller-global-form" method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+                    <input type="hidden" name="action" value="wp_puller_save_global">
+                    <?php wp_nonce_field( 'wp_puller_save_global', 'wp_puller_global_nonce' ); ?>
                     <div class="wp-puller-field">
-                        <label for="wp-puller-repo-url"><?php esc_html_e( 'Repository URL', 'wp-puller' ); ?></label>
-                        <div class="wp-puller-input-group">
-                            <input type="url"
-                                   id="wp-puller-repo-url"
-                                   name="repo_url"
-                                   value="<?php echo esc_attr( $status['repo_url'] ); ?>"
-                                   placeholder="https://github.com/username/theme-repo"
-                                   class="regular-text">
-                            <button type="button" class="button" id="wp-puller-test-connection">
-                                <?php esc_html_e( 'Test', 'wp-puller' ); ?>
-                            </button>
-                        </div>
-                        <p class="description"><?php esc_html_e( 'Enter the full GitHub repository URL containing your theme.', 'wp-puller' ); ?></p>
-                    </div>
-
-                    <div class="wp-puller-field">
-                        <label for="wp-puller-branch"><?php esc_html_e( 'Branch', 'wp-puller' ); ?></label>
-                        <input type="text"
-                               id="wp-puller-branch"
-                               name="branch"
-                               value="<?php echo esc_attr( $status['branch'] ); ?>"
-                               placeholder="main"
-                               class="regular-text">
-                        <p class="description"><?php esc_html_e( 'Branch to track for updates (e.g., main, master, production).', 'wp-puller' ); ?></p>
-                    </div>
-
-                    <div class="wp-puller-field">
-                        <label for="wp-puller-theme-path"><?php esc_html_e( 'Theme Path', 'wp-puller' ); ?></label>
-                        <input type="text"
-                               id="wp-puller-theme-path"
-                               name="theme_path"
-                               value="<?php echo esc_attr( $status['theme_path'] ); ?>"
-                               placeholder="<?php esc_attr_e( 'Leave empty if theme is at repo root', 'wp-puller' ); ?>"
-                               class="regular-text">
-                        <p class="description"><?php esc_html_e( 'Subdirectory containing the theme (e.g., "my-theme" or "themes/starter"). Leave empty if theme files are at repository root.', 'wp-puller' ); ?></p>
-                    </div>
-
-                    <div class="wp-puller-field">
-                        <label for="wp-puller-pat"><?php esc_html_e( 'Personal Access Token', 'wp-puller' ); ?></label>
-                        <input type="password"
-                               id="wp-puller-pat"
-                               name="pat"
-                               value="<?php echo esc_attr( $masked_pat ); ?>"
-                               placeholder="<?php esc_attr_e( 'ghp_xxxxx or github_pat_xxxxx', 'wp-puller' ); ?>"
-                               class="regular-text"
-                               autocomplete="off">
-                        <p class="description">
-                            <?php esc_html_e( 'Required for private repositories.', 'wp-puller' ); ?>
-                            <a href="https://github.com/settings/tokens" target="_blank" rel="noopener">
-                                <?php esc_html_e( 'Create a token', 'wp-puller' ); ?>
-                            </a>
-                        </p>
-                        <?php if ( $pat_status['stored'] ) : ?>
+                        <label for="wp-puller-global-pat"><?php esc_html_e( 'GitHub Token (shared)', 'wp-puller' ); ?></label>
+                        <input type="password" id="wp-puller-global-pat" name="global_pat" value="" placeholder="<?php esc_attr_e( 'ghp_xxxxx or github_pat_xxxxx', 'wp-puller' ); ?>" class="regular-text" autocomplete="off">
+                        <p class="description"><?php echo $global_status['stored'] ? esc_html__( 'A token is already saved (encrypted). Enter a new one only to replace it; leave empty to keep the current token.', 'wp-puller' ) : esc_html__( 'Required for private repositories. Enter a fine-grained token (Contents + Metadata read) or a classic token (repo scope).', 'wp-puller' ); ?></p>
+                        <p class="description"><?php esc_html_e( 'Used by every package unless a package overrides it. Required for private repositories.', 'wp-puller' ); ?></p>
+                        <?php if ( $global_status['stored'] ) : ?>
                             <p class="description" style="margin-top: 4px;">
                                 <strong><?php esc_html_e( 'Token Status:', 'wp-puller' ); ?></strong>
-                                <?php if ( $pat_status['decrypts'] ) : ?>
-                                    <span style="color: #00a32a;"><?php echo esc_html( $pat_status['message'] ); ?></span>
+                                <?php if ( $global_status['decrypts'] ) : ?>
+                                    <span style="color: #00a32a;"><?php echo esc_html( $global_status['message'] ); ?></span>
                                 <?php else : ?>
-                                    <span style="color: #d63638;"><?php echo esc_html( $pat_status['message'] ); ?></span>
+                                    <span style="color: #d63638;"><?php echo esc_html( $global_status['message'] ); ?></span>
                                 <?php endif; ?>
                             </p>
                         <?php endif; ?>
-                    </div>
-
-                    <div class="wp-puller-field wp-puller-field-inline">
-                        <label>
-                            <input type="checkbox"
-                                   id="wp-puller-auto-update"
-                                   name="auto_update"
-                                   value="1"
-                                   <?php checked( $status['auto_update'] ); ?>>
-                            <?php esc_html_e( 'Auto-update on webhook', 'wp-puller' ); ?>
-                        </label>
-                        <p class="description"><?php esc_html_e( 'Automatically update when GitHub sends a push notification.', 'wp-puller' ); ?></p>
                     </div>
 
                     <div class="wp-puller-field">
                         <label for="wp-puller-backup-count"><?php esc_html_e( 'Backups to Keep', 'wp-puller' ); ?></label>
                         <select id="wp-puller-backup-count" name="backup_count">
                             <?php for ( $i = 1; $i <= 10; $i++ ) : ?>
-                                <option value="<?php echo esc_attr( $i ); ?>" <?php selected( get_option( 'wp_puller_backup_count', 3 ), $i ); ?>>
-                                    <?php echo esc_html( $i ); ?>
-                                </option>
+                                <option value="<?php echo esc_attr( $i ); ?>" <?php selected( $backup_count, $i ); ?>><?php echo esc_html( $i ); ?></option>
                             <?php endfor; ?>
                         </select>
                     </div>
 
                     <div class="wp-puller-field-actions">
-                        <button type="submit" class="button button-primary">
-                            <span class="dashicons dashicons-saved"></span>
-                            <?php esc_html_e( 'Save Settings', 'wp-puller' ); ?>
-                        </button>
+                        <button type="submit" class="button button-primary"><?php esc_html_e( 'Save Global Settings', 'wp-puller' ); ?></button>
                     </div>
                 </form>
-            </div>
-        </div>
 
-        <!-- Webhook Card -->
-        <div class="wp-puller-card wp-puller-card-webhook">
-            <div class="wp-puller-card-header">
-                <h2><?php esc_html_e( 'Webhook Setup', 'wp-puller' ); ?></h2>
-            </div>
-            <div class="wp-puller-card-body">
-                <p class="wp-puller-webhook-intro">
-                    <?php esc_html_e( 'Configure a GitHub webhook to receive instant updates when you push to your repository.', 'wp-puller' ); ?>
-                </p>
+                <hr>
 
+                <h3><?php esc_html_e( 'Webhook (shared)', 'wp-puller' ); ?></h3>
+                <p class="wp-puller-webhook-intro"><?php esc_html_e( 'One webhook handles every package. Point all your repositories at this URL and secret.', 'wp-puller' ); ?></p>
                 <div class="wp-puller-webhook-field">
                     <label><?php esc_html_e( 'Payload URL', 'wp-puller' ); ?></label>
                     <div class="wp-puller-copy-field">
                         <input type="text" readonly value="<?php echo esc_attr( $webhook_info['url'] ); ?>" id="webhook-url">
-                        <button type="button" class="button wp-puller-copy-btn" data-copy="webhook-url">
-                            <span class="dashicons dashicons-clipboard"></span>
-                        </button>
+                        <button type="button" class="button wp-puller-copy-btn" data-copy="webhook-url"><span class="dashicons dashicons-clipboard"></span></button>
                     </div>
                 </div>
-
                 <div class="wp-puller-webhook-field">
                     <label><?php esc_html_e( 'Secret', 'wp-puller' ); ?></label>
                     <div class="wp-puller-copy-field">
                         <input type="password" readonly value="<?php echo esc_attr( $webhook_info['secret'] ); ?>" id="webhook-secret">
-                        <button type="button" class="button wp-puller-copy-btn" data-copy="webhook-secret">
-                            <span class="dashicons dashicons-clipboard"></span>
-                        </button>
-                        <button type="button" class="button" id="wp-puller-regenerate-secret" title="<?php esc_attr_e( 'Regenerate Secret', 'wp-puller' ); ?>">
-                            <span class="dashicons dashicons-update"></span>
-                        </button>
+                        <button type="button" class="button wp-puller-copy-btn" data-copy="webhook-secret"><span class="dashicons dashicons-clipboard"></span></button>
+                        <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="display:inline;">
+                            <input type="hidden" name="action" value="wp_puller_regenerate_secret">
+                            <?php wp_nonce_field( 'wp_puller_regenerate_secret', 'wp_puller_regen_nonce' ); ?>
+                            <button type="submit" class="button" title="<?php esc_attr_e( 'Regenerate Secret', 'wp-puller' ); ?>"><span class="dashicons dashicons-update"></span></button>
+                        </form>
                     </div>
                 </div>
-
-                <div class="wp-puller-webhook-field">
-                    <label><?php esc_html_e( 'Content Type', 'wp-puller' ); ?></label>
-                    <code>application/json</code>
-                </div>
-
-                <details class="wp-puller-instructions">
-                    <summary><?php esc_html_e( 'Setup Instructions', 'wp-puller' ); ?></summary>
-                    <ol>
-                        <?php foreach ( $webhook_info['steps'] as $step ) : ?>
-                            <li><?php echo esc_html( $step ); ?></li>
-                        <?php endforeach; ?>
-                    </ol>
-                </details>
             </div>
         </div>
 
-        <!-- Backups Card -->
-        <div class="wp-puller-card wp-puller-card-backups">
+        <!-- Packages Card -->
+        <div class="wp-puller-card wp-puller-card-packages">
             <div class="wp-puller-card-header">
-                <h2><?php esc_html_e( 'Backups', 'wp-puller' ); ?></h2>
-                <span class="wp-puller-badge"><?php echo count( $backups ); ?></span>
+                <h2><?php esc_html_e( 'Packages', 'wp-puller' ); ?></h2>
+                <a href="<?php echo esc_url( add_query_arg( 'wp_puller_add', '1' ) ); ?>" class="button" id="wp-puller-add-package"><?php esc_html_e( 'Add Package', 'wp-puller' ); ?></a>
             </div>
             <div class="wp-puller-card-body">
-                <?php if ( empty( $backups ) ) : ?>
-                    <p class="wp-puller-empty"><?php esc_html_e( 'No backups yet. A backup is created automatically before each update.', 'wp-puller' ); ?></p>
+                <div id="wp-puller-package-panel" style="display:none;"></div>
+
+                <?php if ( empty( $packages ) ) : ?>
+                    <p class="wp-puller-empty"><?php esc_html_e( 'No packages yet. Click "Add Package" to connect a repository.', 'wp-puller' ); ?></p>
                 <?php else : ?>
-                    <ul class="wp-puller-backup-list" id="wp-puller-backup-list">
-                        <?php foreach ( $backups as $backup ) : ?>
-                            <li class="wp-puller-backup-item" data-name="<?php echo esc_attr( $backup['name'] ); ?>">
-                                <div class="wp-puller-backup-info">
-                                    <span class="wp-puller-backup-name"><?php echo esc_html( $backup['name'] ); ?></span>
-                                    <span class="wp-puller-backup-meta">
-                                        <?php echo esc_html( $backup['datetime'] ); ?> &middot;
-                                        <?php echo esc_html( WP_Puller_Backup::format_size( $backup['size'] ) ); ?>
-                                    </span>
+                    <ul class="wp-puller-package-list" id="wp-puller-package-list">
+                        <?php foreach ( $packages as $view ) : ?>
+                            <?php
+                                $pkg    = $view['pkg'];
+                                $status = $view['status'];
+                                $info   = $view['info'];
+                                $pbacks = $view['backups'];
+                            ?>
+                            <li class="wp-puller-package-item" data-id="<?php echo esc_attr( $pkg['id'] ); ?>"
+                                data-label="<?php echo esc_attr( $pkg['label'] ); ?>"
+                                data-repo="<?php echo esc_attr( $pkg['repo_url'] ); ?>"
+                                data-branch="<?php echo esc_attr( $pkg['branch'] ); ?>"
+                                data-type="<?php echo esc_attr( $pkg['package_type'] ); ?>"
+                                data-source="<?php echo esc_attr( $pkg['source_path'] ); ?>"
+                                data-slug="<?php echo esc_attr( $pkg['plugin_slug'] ); ?>"
+                                data-auto="<?php echo $pkg['auto_update'] ? '1' : '0'; ?>"
+                                data-token="<?php echo esc_attr( $pkg['token_mode'] ); ?>"
+                                data-webhook="<?php echo esc_attr( $pkg['webhook_mode'] ); ?>">
+                                <div class="wp-puller-package-main">
+                                    <div class="wp-puller-package-title">
+                                        <strong><?php echo esc_html( $pkg['label'] ?: $pkg['repo_url'] ); ?></strong>
+                                        <span class="wp-puller-badge wp-puller-badge-<?php echo 'plugin' === $pkg['package_type'] ? 'info' : 'success'; ?>"><?php echo 'plugin' === $pkg['package_type'] ? esc_html__( 'Plugin', 'wp-puller' ) : esc_html__( 'Theme', 'wp-puller' ); ?></span>
+                                        <?php if ( ! empty( $status['is_configured'] ) ) : ?>
+                                            <span class="wp-puller-badge wp-puller-badge-success"><?php esc_html_e( 'Connected', 'wp-puller' ); ?></span>
+                                        <?php else : ?>
+                                            <span class="wp-puller-badge wp-puller-badge-warning"><?php esc_html_e( 'Not Configured', 'wp-puller' ); ?></span>
+                                        <?php endif; ?>
+                                    </div>
+                                    <div class="wp-puller-package-meta">
+                                        <?php echo esc_html( $pkg['repo_url'] ); ?>
+                                        <?php if ( $pkg['branch'] ) : ?> &middot; <code><?php echo esc_html( $pkg['branch'] ); ?></code><?php endif; ?>
+                                        <?php if ( ! empty( $status['pinned_commit'] ) ) : ?> &middot; <span class="wp-puller-badge wp-puller-badge-info"><?php esc_html_e( 'Pinned', 'wp-puller' ); ?> <code><?php echo esc_html( substr( $status['pinned_commit'], 0, 7 ) ); ?></code></span><?php endif; ?>
+                                        <?php if ( $status['short_commit'] ) : ?> &middot; <?php esc_html_e( 'Commit', 'wp-puller' ); ?> <code><?php echo esc_html( $status['short_commit'] ); ?></code><?php endif; ?>
+                                        <?php if ( ! empty( $status['commit_message'] ) ) : ?> &middot; <span class="wp-puller-commit-msg"><?php echo esc_html( wp_trim_words( $status['commit_message'], 12, '…' ) ); ?></span><?php endif; ?>
+                                    </div>
+                                    <div class="wp-puller-package-actions">
+                                        <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="display:inline;">
+                                            <input type="hidden" name="action" value="wp_puller_check_updates">
+                                            <input type="hidden" name="pkg_id" value="<?php echo esc_attr( $pkg['id'] ); ?>">
+                                            <?php wp_nonce_field( 'wp_puller_check_updates', 'wp_puller_check_nonce' ); ?>
+                                            <button type="submit" class="button"><?php esc_html_e( 'Check', 'wp-puller' ); ?></button>
+                                        </form>
+                                        <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="display:inline;">
+                                            <input type="hidden" name="action" value="wp_puller_update_package">
+                                            <input type="hidden" name="pkg_id" value="<?php echo esc_attr( $pkg['id'] ); ?>">
+                                            <?php wp_nonce_field( 'wp_puller_update_package', 'wp_puller_update_nonce' ); ?>
+                                            <button type="submit" class="button button-primary"><?php esc_html_e( 'Update Now', 'wp-puller' ); ?></button>
+                                        </form>
+                                        <a href="<?php echo esc_url( add_query_arg( 'wp_puller_edit', $pkg['id'] ) ); ?>" class="button"><?php esc_html_e( 'Edit', 'wp-puller' ); ?></a>
+                                        <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="display:inline;">
+                                            <input type="hidden" name="action" value="wp_puller_delete_package">
+                                            <input type="hidden" name="pkg_id" value="<?php echo esc_attr( $pkg['id'] ); ?>">
+                                            <?php wp_nonce_field( 'wp_puller_delete_package', 'wp_puller_delete_nonce' ); ?>
+                                            <button type="submit" class="button button-small" onclick="return confirm('<?php echo esc_js( __( 'Are you sure you want to delete this package?', 'wp-puller' ) ); ?>');"><span class="dashicons dashicons-trash"></span></button>
+                                        </form>
+                                    </div>
                                 </div>
-                                <div class="wp-puller-backup-actions">
-                                    <button type="button" class="button button-small wp-puller-restore-backup" data-name="<?php echo esc_attr( $backup['name'] ); ?>">
-                                        <?php esc_html_e( 'Restore', 'wp-puller' ); ?>
-                                    </button>
-                                    <button type="button" class="button button-small wp-puller-delete-backup" data-name="<?php echo esc_attr( $backup['name'] ); ?>">
-                                        <span class="dashicons dashicons-trash"></span>
-                                    </button>
+                                <div class="wp-puller-package-backups" id="wp-puller-backups-<?php echo esc_attr( $pkg['id'] ); ?>" style="display:block;">
+                                    <?php if ( empty( $pbacks ) ) : ?>
+                                        <p class="wp-puller-empty"><?php esc_html_e( 'No backups yet.', 'wp-puller' ); ?></p>
+                                    <?php else : ?>
+                                        <ul class="wp-puller-backup-list">
+                                            <?php foreach ( $pbacks as $backup ) : ?>
+                                                <li class="wp-puller-backup-item" data-name="<?php echo esc_attr( $backup['name'] ); ?>">
+                                                    <div class="wp-puller-backup-info">
+                                                        <span class="wp-puller-backup-name"><?php echo esc_html( $backup['name'] ); ?></span>
+                                                        <span class="wp-puller-backup-meta"><?php echo esc_html( $backup['datetime'] ); ?> &middot; <?php echo esc_html( WP_Puller_Backup::format_size( $backup['size'] ) ); ?></span>
+                                                    </div>
+                                                    <div class="wp-puller-backup-actions">
+                                                        <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="display:inline;">
+                                                            <input type="hidden" name="action" value="wp_puller_restore_backup">
+                                                            <input type="hidden" name="pkg_id" value="<?php echo esc_attr( $pkg['id'] ); ?>">
+                                                            <input type="hidden" name="backup_name" value="<?php echo esc_attr( $backup['name'] ); ?>">
+                                                            <?php wp_nonce_field( 'wp_puller_restore_backup', 'wp_puller_restore_nonce' ); ?>
+                                                            <button type="submit" class="button button-small"><?php esc_html_e( 'Restore', 'wp-puller' ); ?></button>
+                                                        </form>
+                                                        <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="display:inline;">
+                                                            <input type="hidden" name="action" value="wp_puller_delete_backup">
+                                                            <input type="hidden" name="backup_name" value="<?php echo esc_attr( $backup['name'] ); ?>">
+                                                            <?php wp_nonce_field( 'wp_puller_delete_backup', 'wp_puller_delete_backup_nonce' ); ?>
+                                                            <button type="submit" class="button button-small" onclick="return confirm('<?php echo esc_js( __( 'Are you sure?', 'wp-puller' ) ); ?>');"><span class="dashicons dashicons-trash"></span></button>
+                                                        </form>
+                                                    </div>
+                                                </li>
+                                            <?php endforeach; ?>
+                                        </ul>
+                                    <?php endif; ?>
                                 </div>
                             </li>
                         <?php endforeach; ?>
@@ -278,9 +215,11 @@ $pat_status   = WP_Puller_Admin::get_pat_status();
             <div class="wp-puller-card-header">
                 <h2><?php esc_html_e( 'Activity Log', 'wp-puller' ); ?></h2>
                 <?php if ( ! empty( $logs ) ) : ?>
-                    <button type="button" class="button button-small" id="wp-puller-clear-logs">
-                        <?php esc_html_e( 'Clear', 'wp-puller' ); ?>
-                    </button>
+                    <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="display:inline;">
+                        <input type="hidden" name="action" value="wp_puller_clear_logs">
+                        <?php wp_nonce_field( 'wp_puller_clear_logs', 'wp_puller_clear_logs_nonce' ); ?>
+                        <button type="submit" class="button button-small"><?php esc_html_e( 'Clear', 'wp-puller' ); ?></button>
+                    </form>
                 <?php endif; ?>
             </div>
             <div class="wp-puller-card-body">
@@ -318,3 +257,88 @@ $pat_status   = WP_Puller_Admin::get_pat_status();
         </p>
     </div>
 </div>
+
+<!-- Reusable package form (server-rendered, toggled by JS for add/edit) -->
+    <?php
+    $edit_pkg = null;
+    if ( ! empty( $_GET['wp_puller_edit'] ) ) {
+        $edit_pkg = WP_Puller::get_package( sanitize_key( wp_unslash( $_GET['wp_puller_edit'] ) ) );
+    }
+    $f = $edit_pkg ? $edit_pkg : array(
+        'id' => '', 'label' => '', 'repo_url' => '', 'branch' => 'main', 'package_type' => 'plugin',
+        'source_path' => '', 'plugin_slug' => '', 'auto_update' => true, 'token_mode' => 'global', 'webhook_mode' => 'global', 'commit' => '',
+    );
+    ?>
+    <details class="wp-puller-pkg-details" id="wp-puller-pkg-form-wrap" <?php if ( $edit_pkg || ! empty( $_GET['wp_puller_add'] ) || empty( $packages ) ) echo 'open'; ?>>
+        <summary><?php esc_html_e( 'Add / Edit Package', 'wp-puller' ); ?></summary>
+        <form class="wp-puller-pkg-form" method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+            <input type="hidden" name="action" value="wp_puller_save_package">
+            <?php wp_nonce_field( 'wp_puller_save_package', 'wp_puller_pkg_nonce' ); ?>
+            <input type="hidden" name="pkg_id" value="<?php echo esc_attr( $f['id'] ); ?>">
+            <div class="wp-puller-field">
+                <label><?php esc_html_e( 'Label', 'wp-puller' ); ?></label>
+                <input type="text" name="label" class="regular-text" value="<?php echo esc_attr( $f['label'] ); ?>" placeholder="<?php esc_attr_e( 'My Plugin', 'wp-puller' ); ?>">
+            </div>
+            <div class="wp-puller-field">
+                <label><?php esc_html_e( 'Repository URL', 'wp-puller' ); ?></label>
+                <input type="url" name="repo_url" class="regular-text" value="<?php echo esc_attr( $f['repo_url'] ); ?>" placeholder="https://github.com/username/repo">
+            </div>
+            <div class="wp-puller-field">
+                <label><?php esc_html_e( 'Branch', 'wp-puller' ); ?></label>
+                <input type="text" name="branch" class="regular-text" value="<?php echo esc_attr( $f['branch'] ); ?>">
+            </div>
+            <div class="wp-puller-field">
+                <label><?php esc_html_e( 'Commit (optional)', 'wp-puller' ); ?></label>
+                <input type="text" name="commit" class="regular-text" value="<?php echo esc_attr( ! empty( $f['commit'] ) ? $f['commit'] : '' ); ?>" placeholder="<?php esc_attr_e( 'Leave empty for latest, or paste a commit SHA to pin', 'wp-puller' ); ?>">
+                <p class="description"><?php esc_html_e( 'Pin a specific commit to deploy. Leave empty to always deploy the latest commit of the branch.', 'wp-puller' ); ?></p>
+            </div>
+            <div class="wp-puller-field">
+                <label><?php esc_html_e( 'Package Type', 'wp-puller' ); ?></label>
+                <select name="package_type">
+                    <option value="plugin" <?php selected( $f['package_type'], 'plugin' ); ?>><?php esc_html_e( 'Plugin', 'wp-puller' ); ?></option>
+                    <option value="theme" <?php selected( $f['package_type'], 'theme' ); ?>><?php esc_html_e( 'Theme', 'wp-puller' ); ?></option>
+                </select>
+            </div>
+            <div class="wp-puller-field">
+                <label><?php esc_html_e( 'Repository Path', 'wp-puller' ); ?></label>
+                <input type="text" name="source_path" class="regular-text" value="<?php echo esc_attr( $f['source_path'] ); ?>" placeholder="<?php esc_attr_e( 'Leave empty if package is at repo root', 'wp-puller' ); ?>">
+                <p class="description"><?php esc_html_e( 'Subdirectory within the repository containing the package.', 'wp-puller' ); ?></p>
+            </div>
+            <div class="wp-puller-field">
+                <label><?php esc_html_e( 'Plugin Slug', 'wp-puller' ); ?></label>
+                <input type="text" name="plugin_slug" class="regular-text" value="<?php echo esc_attr( $f['plugin_slug'] ); ?>" placeholder="<?php esc_attr_e( 'e.g. my-plugin or my-plugin/my-plugin.php', 'wp-puller' ); ?>">
+                <p class="description"><?php esc_html_e( 'Auto-filled after first deploy if empty.', 'wp-puller' ); ?></p>
+            </div>
+            <div class="wp-puller-field wp-puller-field-inline">
+                <label><input type="checkbox" name="auto_update" value="1" <?php checked( ! empty( $f['auto_update'] ) ); ?>> <?php esc_html_e( 'Auto-update on webhook', 'wp-puller' ); ?></label>
+            </div>
+            <div class="wp-puller-field">
+                <label><?php esc_html_e( 'Token Mode', 'wp-puller' ); ?></label>
+                <select name="token_mode">
+                    <option value="global" <?php selected( $f['token_mode'], 'global' ); ?>><?php esc_html_e( 'Use global token', 'wp-puller' ); ?></option>
+                    <option value="custom" <?php selected( $f['token_mode'], 'custom' ); ?>><?php esc_html_e( 'Custom token', 'wp-puller' ); ?></option>
+                </select>
+            </div>
+            <div class="wp-puller-field">
+                <label><?php esc_html_e( 'Custom Token (only if mode = custom)', 'wp-puller' ); ?></label>
+                <input type="password" name="pat" class="regular-text" placeholder="<?php esc_attr_e( 'ghp_xxxxx or github_pat_xxxxx', 'wp-puller' ); ?>" autocomplete="off">
+            </div>
+            <div class="wp-puller-field">
+                <label><?php esc_html_e( 'Webhook Mode', 'wp-puller' ); ?></label>
+                <select name="webhook_mode">
+                    <option value="global" <?php selected( $f['webhook_mode'], 'global' ); ?>><?php esc_html_e( 'Use global webhook secret', 'wp-puller' ); ?></option>
+                    <option value="custom" <?php selected( $f['webhook_mode'], 'custom' ); ?>><?php esc_html_e( 'Custom webhook secret', 'wp-puller' ); ?></option>
+                </select>
+            </div>
+            <div class="wp-puller-field">
+                <label><?php esc_html_e( 'Custom Webhook Secret (only if mode = custom)', 'wp-puller' ); ?></label>
+                <input type="password" name="webhook_secret" class="regular-text" placeholder="<?php esc_attr_e( 'Custom secret', 'wp-puller' ); ?>" autocomplete="off">
+            </div>
+            <div class="wp-puller-field-actions">
+                <button type="submit" class="button button-primary"><?php esc_html_e( 'Save Package', 'wp-puller' ); ?></button>
+                <?php if ( $edit_pkg ) : ?>
+                    <a href="<?php echo esc_url( remove_query_arg( 'wp_puller_edit' ) ); ?>" class="button"><?php esc_html_e( 'Cancel', 'wp-puller' ); ?></a>
+                <?php endif; ?>
+            </div>
+        </form>
+    </details>

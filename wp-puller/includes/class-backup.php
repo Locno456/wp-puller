@@ -78,53 +78,70 @@ class WP_Puller_Backup {
     }
 
     /**
-     * Create a backup of the current active theme.
+     * Create a backup of a package (theme or plugin).
      *
+     * Returns an empty string (not an error) when there is no installed package
+     * to back up yet (e.g. the very first deploy into an empty target).
+     *
+     * @param array $pkg Package configuration.
      * @return string|WP_Error Backup directory path on success, WP_Error on failure.
      */
-    public function create_backup() {
+    public function create_backup( $pkg ) {
         $result = $this->ensure_backup_dir();
 
         if ( is_wp_error( $result ) ) {
             return $result;
         }
 
-        $theme      = wp_get_theme();
-        $theme_dir  = $theme->get_stylesheet_directory();
-        $theme_slug = $theme->get_stylesheet();
+        $location = WP_Puller_Updater::get_package_location( $pkg );
 
-        if ( ! is_dir( $theme_dir ) ) {
-            return new WP_Error(
-                'theme_not_found',
-                __( 'Active theme directory not found.', 'wp-puller' )
-            );
+        if ( empty( $location['path'] ) || ( ! is_dir( $location['path'] ) && ! is_file( $location['path'] ) ) ) {
+            // Nothing installed to back up yet — not an error.
+            return '';
         }
 
+        $slug = $location['slug'];
+
         $timestamp   = gmdate( 'Y-m-d_H-i-s' );
-        $backup_name = $theme_slug . '_' . $timestamp;
+        $backup_name = $slug . '_' . $timestamp;
         $backup_path = $this->get_backup_dir() . '/' . $backup_name;
 
         global $wp_filesystem;
 
-        if ( ! $this->recursive_copy( $theme_dir, $backup_path ) ) {
-            return new WP_Error(
-                'backup_failed',
-                __( 'Failed to create theme backup.', 'wp-puller' )
-            );
+        if ( 'file' === $location['kind'] ) {
+            // Single-file package: store the file inside a backup directory.
+            if ( ! $wp_filesystem->is_dir( $backup_path ) ) {
+                $wp_filesystem->mkdir( $backup_path, 0755 );
+            }
+
+            if ( ! $wp_filesystem->copy( $location['path'], $backup_path . '/' . basename( $location['path'] ) ) ) {
+                return new WP_Error(
+                    'backup_failed',
+                    __( 'Failed to create package backup.', 'wp-puller' )
+                );
+            }
+        } else {
+            if ( ! $this->recursive_copy( $location['path'], $backup_path ) ) {
+                return new WP_Error(
+                    'backup_failed',
+                    __( 'Failed to create package backup.', 'wp-puller' )
+                );
+            }
         }
 
-        $this->cleanup_old_backups( $theme_slug );
+        $this->cleanup_old_backups( $slug );
 
         return $backup_path;
     }
 
     /**
-     * Restore theme from a backup.
+     * Restore a package (theme or plugin) from a backup.
      *
      * @param string $backup_name Backup directory name.
+     * @param array  $pkg         Package configuration.
      * @return bool|WP_Error True on success, WP_Error on failure.
      */
-    public function restore_backup( $backup_name ) {
+    public function restore_backup( $backup_name, $pkg = null ) {
         $backup_path = $this->get_backup_dir() . '/' . sanitize_file_name( $backup_name );
 
         if ( ! is_dir( $backup_path ) ) {
@@ -140,19 +157,34 @@ class WP_Puller_Backup {
             WP_Filesystem();
         }
 
-        $theme     = wp_get_theme();
-        $theme_dir = $theme->get_stylesheet_directory();
-        $parent    = dirname( $theme_dir );
-        $suffix    = wp_generate_password( 8, false );
+        $location = WP_Puller_Updater::get_package_location( $pkg );
 
-        // Staging/old dirs live next to the theme (same filesystem, so the
+        // Restoring requires knowing which package to target. Themes always
+        // resolve to the active theme; plugins rely on the saved slug.
+        if ( empty( $location['slug'] ) ) {
+            return new WP_Error(
+                'backup_target_unknown',
+                __( 'Cannot determine which package to restore. Open WP Puller settings, save the package configuration, then try again.', 'wp-puller' )
+            );
+        }
+
+        // If the live package was uninstalled, rebuild its path from the slug.
+        // (The active theme always exists, so this only affects plugins.)
+        if ( empty( $location['path'] ) || ( ! is_dir( $location['path'] ) && ! is_file( $location['path'] ) ) ) {
+            $location['path'] = WP_PLUGIN_DIR . '/' . ltrim( $location['slug'], '/' );
+        }
+
+        $parent = ( 'file' === $location['kind'] ) ? WP_PLUGIN_DIR : dirname( $location['path'] );
+        $suffix = wp_generate_password( 8, false );
+
+        // Staging/old dirs live next to the package (same filesystem, so the
         // swap below is a fast rename) and are dot-prefixed so WordPress's
-        // theme scanner ignores them while they briefly exist.
+        // scanner ignores them while they briefly exist.
         $staging = $parent . '/.wp-puller-restore-' . $suffix;
         $old_dir = $parent . '/.wp-puller-old-' . $suffix;
 
         // 1. Build the restored copy in staging first. If anything fails here,
-        //    the live theme has not been touched.
+        //    the live package has not been touched.
         if ( ! $this->recursive_copy( $backup_path, $staging ) ) {
             $this->recursive_delete( $staging );
             return new WP_Error(
@@ -161,29 +193,49 @@ class WP_Puller_Backup {
             );
         }
 
-        // 2. Move the current theme aside (kept for rollback).
-        if ( is_dir( $theme_dir ) && ! $wp_filesystem->move( $theme_dir, $old_dir ) ) {
+        // 2. Move the current package aside (kept for rollback).
+        if ( ( is_dir( $location['path'] ) || is_file( $location['path'] ) )
+            && ! $wp_filesystem->move( $location['path'], $old_dir ) ) {
             $this->recursive_delete( $staging );
             return new WP_Error(
                 'restore_failed',
-                __( 'Failed to set the current theme aside for restore.', 'wp-puller' )
+                __( 'Failed to set the current package aside for restore.', 'wp-puller' )
             );
         }
 
-        // 3. Move staging into place. On failure, roll the original back.
-        if ( ! $wp_filesystem->move( $staging, $theme_dir ) ) {
-            if ( is_dir( $old_dir ) ) {
-                $wp_filesystem->move( $old_dir, $theme_dir );
+        if ( 'file' === $location['kind'] ) {
+            // Single-file package: copy the staged file into place.
+            $staged_file = $staging . '/' . basename( $location['path'] );
+
+            if ( ! is_file( $staged_file ) || ! $wp_filesystem->copy( $staged_file, $location['path'] ) ) {
+                if ( is_dir( $old_dir ) || is_file( $old_dir ) ) {
+                    $wp_filesystem->move( $old_dir, $location['path'] );
+                }
+                $this->recursive_delete( $staging );
+                return new WP_Error(
+                    'restore_failed',
+                    __( 'Failed to restore the package file; the original was kept.', 'wp-puller' )
+                );
             }
-            $this->recursive_delete( $staging );
-            return new WP_Error(
-                'restore_failed',
-                __( 'Failed to activate the restored theme; the original was kept.', 'wp-puller' )
-            );
-        }
 
-        // 4. Success: discard the old copy.
-        $this->recursive_delete( $old_dir );
+            $this->recursive_delete( $staging );
+            $this->recursive_delete( $old_dir );
+        } else {
+            // 3. Move staging into place. On failure, roll the original back.
+            if ( ! $wp_filesystem->move( $staging, $location['path'] ) ) {
+                if ( is_dir( $old_dir ) || is_file( $old_dir ) ) {
+                    $wp_filesystem->move( $old_dir, $location['path'] );
+                }
+                $this->recursive_delete( $staging );
+                return new WP_Error(
+                    'restore_failed',
+                    __( 'Failed to activate the restored package; the original was kept.', 'wp-puller' )
+                );
+            }
+
+            // 4. Success: discard the old copy.
+            $this->recursive_delete( $old_dir );
+        }
 
         return true;
     }
