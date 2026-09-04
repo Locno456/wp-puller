@@ -44,6 +44,22 @@ class WP_Puller_GitHub_API {
     const CACHE_DURATION = 300;
 
     /**
+     * Package currently being operated on (controls which token is used).
+     *
+     * @var array|null
+     */
+    private $current_package = null;
+
+    /**
+     * Set the package for subsequent API calls (selects its token).
+     *
+     * @param array $pkg Package configuration.
+     */
+    public function set_package( $pkg ) {
+        $this->current_package = $pkg;
+    }
+
+    /**
      * Parse a GitHub repository URL.
      *
      * Supports formats:
@@ -364,34 +380,43 @@ class WP_Puller_GitHub_API {
             }
 
             if ( 404 === $status_code ) {
-                $pat = $this->get_pat();
-                $has_pat = ! empty( $pat );
-                $auth_type = '';
+                $pat      = $this->get_pat();
+                $has_pat  = ! empty( $pat );
+                $auth_type = 'unknown-format';
 
                 if ( $has_pat ) {
                     if ( strpos( $pat, 'github_pat_' ) === 0 ) {
                         $auth_type = 'fine-grained';
                     } elseif ( strpos( $pat, 'ghp_' ) === 0 ) {
                         $auth_type = 'classic';
-                    } else {
-                        $auth_type = 'unknown-format';
                     }
                 }
 
                 if ( ! $has_pat ) {
+                    // GitHub returns 404 both for private repos accessed without a
+                    // token and for repositories that simply do not exist, so we
+                    // cannot distinguish the two. The actionable cause is almost
+                    // always a missing token or a wrong URL.
                     return new WP_Error(
                         'not_found',
-                        __( 'Repository not found (404). For private repos, add a Personal Access Token.', 'wp-puller' )
+                        __( 'GitHub returned 404 — the repository could not be found or accessed. This usually means the repository is PRIVATE and no Personal Access Token was provided, or the repository URL / owner is incorrect. Fix: make the repository public, or add a Personal Access Token (fine-grained with Contents + Metadata read access, or classic with the repo scope) in WP Puller settings and try again.', 'wp-puller' )
                     );
                 }
+
+                // A token is present yet GitHub still returns 404, so the token
+                // cannot see this repository.
+                $hint = 'fine-grained' === $auth_type
+                    ? __( 'For fine-grained tokens, make sure this exact repository is selected and granted Contents (read) and Metadata (read) access.', 'wp-puller' )
+                    : __( 'For classic tokens, make sure the token has the repo scope.', 'wp-puller' );
 
                 return new WP_Error(
                     'not_found',
                     sprintf(
-                        /* translators: %1$s: auth type, %2$s: endpoint */
-                        __( 'Repository not found (404). Auth: %1$s. Endpoint: %2$s. Ensure token has Contents + Metadata read access for this specific repo.', 'wp-puller' ),
+                        /* translators: %1$s: token type, %2$s: repository endpoint, %3$s: hint */
+                        __( 'GitHub returned 404 even though a %1$s token is set. The token cannot access this repository (%2$s). Check that the owner/repo is correct and the token is not expired. %3$s', 'wp-puller' ),
                         $auth_type,
-                        $endpoint
+                        $endpoint,
+                        $hint
                     )
                 );
             }
@@ -403,18 +428,15 @@ class WP_Puller_GitHub_API {
     }
 
     /**
-     * Get the stored Personal Access Token.
+     * Get the Personal Access Token for the current package.
+     *
+     * Resolves the effective token via WP_Puller::get_package_token(), which
+     * falls back to the global token when the package uses global mode.
      *
      * @return string
      */
     private function get_pat() {
-        $encrypted = get_option( 'wp_puller_pat', '' );
-
-        if ( empty( $encrypted ) ) {
-            return '';
-        }
-
-        return WP_Puller::decrypt( $encrypted );
+        return WP_Puller::get_package_token( $this->current_package );
     }
 
     /**

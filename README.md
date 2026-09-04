@@ -1,6 +1,6 @@
 # WP Puller
 
-Auto-update WordPress themes from GitHub. Free and open source.
+Auto-update WordPress themes **and plugins** from GitHub. Free and open source.
 
 [![WordPress 5.0+](https://img.shields.io/badge/WordPress-5.0%2B-0073aa.svg)](https://wordpress.org/)
 [![PHP 7.4+](https://img.shields.io/badge/PHP-7.4%2B-777bb4.svg)](https://php.net/)
@@ -19,9 +19,10 @@ WP Puller connects your WordPress theme to a GitHub repository. When you push ch
 ## What It Does
 
 - **Webhook-based deploys** - Push to GitHub, site updates automatically
+- **Themes & plugins** - Deploy either a theme or a plugin from the same repo
 - **Private repo support** - Connect with a GitHub Personal Access Token
 - **Automatic backups** - Snapshot before every update, one-click restore
-- **Subdirectory themes** - Theme doesn't need to be at repo root
+- **Subdirectory packages** - Theme/plugin doesn't need to be at repo root
 - **Branch selection** - Deploy from main, staging, production, or any branch
 
 ---
@@ -126,7 +127,7 @@ Same core idea—deploy WordPress themes from GitHub. WP Puller is free and open
 Restore from the Backups section. WP Puller keeps automatic backups before every update.
 
 **Can I use this for plugins?**
-Not yet. Theme-only for now.
+Yes. Set **Package Type** to *Plugin* in the settings. WP Puller auto-detects the plugin inside the repository (a single-file plugin at the root, or a plugin directory), deactivates it during the file swap, then re-activates it. The detected plugin slug is saved automatically; you can also set it manually (e.g. `my-plugin` or `my-plugin/my-plugin.php`).
 
 **Does it work with GitLab/Bitbucket?**
 GitHub only.

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WP Puller
  * Plugin URI: https://github.com/codician-team/wp-puller
- * Description: Automatically update your WordPress theme from GitHub. Supports public and private repositories with webhook-based real-time updates.
+ * Description: Automatically update your WordPress theme or plugin from GitHub. Supports public and private repositories with webhook-based real-time updates.
  * Version: 1.0.8
  * Requires at least: 5.0
  * Requires PHP: 7.4
@@ -44,19 +44,42 @@ function wp_puller() {
 function wp_puller_activate() {
     if ( ! get_option( 'wp_puller_webhook_secret' ) ) {
         // Stored encrypted at rest via WordPress salt-derived encryption.
+        // This is the global webhook secret shared by all packages.
         update_option( 'wp_puller_webhook_secret', WP_Puller::encrypt( wp_generate_password( 32, false ) ) );
-    }
-
-    if ( false === get_option( 'wp_puller_branch' ) ) {
-        update_option( 'wp_puller_branch', 'main' );
-    }
-
-    if ( false === get_option( 'wp_puller_auto_update' ) ) {
-        update_option( 'wp_puller_auto_update', true );
     }
 
     if ( false === get_option( 'wp_puller_backup_count' ) ) {
         update_option( 'wp_puller_backup_count', 3 );
+    }
+
+    if ( false === get_option( 'wp_puller_packages' ) ) {
+        // Migrate a legacy single-package configuration into the new
+        // multi-package model, if one exists.
+        $packages = array();
+        $old_repo = get_option( 'wp_puller_repo_url', '' );
+
+        if ( ! empty( $old_repo ) ) {
+            $packages[] = WP_Puller::normalize_package( array(
+                'label'         => __( 'Migrated package', 'wp-puller' ),
+                'repo_url'      => $old_repo,
+                'branch'        => get_option( 'wp_puller_branch', 'main' ),
+                'package_type'  => get_option( 'wp_puller_package_type', 'plugin' ),
+                'source_path'   => get_option( 'wp_puller_theme_path', '' ),
+                'plugin_slug'   => get_option( 'wp_puller_plugin_slug', '' ),
+                'package_kind'  => get_option( 'wp_puller_package_kind', 'dir' ),
+                'auto_update'   => get_option( 'wp_puller_auto_update', true ),
+                'latest_commit' => get_option( 'wp_puller_latest_commit', '' ),
+                'last_check'    => get_option( 'wp_puller_last_check', 0 ),
+            ) );
+
+            // Promote the legacy token to the global token.
+            $old_pat = get_option( 'wp_puller_pat', '' );
+            if ( ! empty( $old_pat ) ) {
+                update_option( 'wp_puller_global_pat', $old_pat );
+            }
+        }
+
+        update_option( 'wp_puller_packages', $packages );
     }
 
     flush_rewrite_rules();

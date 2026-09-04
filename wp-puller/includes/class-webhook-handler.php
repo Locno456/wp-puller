@@ -2,6 +2,12 @@
 /**
  * Webhook Handler class for WP Puller.
  *
+ * A single REST endpoint receives GitHub push events for every configured
+ * package. On a push it matches the payload's repository and branch against
+ * all packages and updates each match (respecting auto-update). The webhook
+ * signature is verified against the global secret and any per-package custom
+ * secret.
+ *
  * @package WP_Puller
  * @since 1.0.0
  */
@@ -30,9 +36,9 @@ class WP_Puller_Webhook_Handler {
     const REST_ROUTE = '/webhook';
 
     /**
-     * Theme updater instance.
+     * Package updater instance.
      *
-     * @var WP_Puller_Theme_Updater
+     * @var WP_Puller_Updater
      */
     private $updater;
 
@@ -44,14 +50,23 @@ class WP_Puller_Webhook_Handler {
     private $logger;
 
     /**
+     * GitHub API instance.
+     *
+     * @var WP_Puller_GitHub_API
+     */
+    private $github_api;
+
+    /**
      * Constructor.
      *
-     * @param WP_Puller_Theme_Updater $updater Theme updater instance.
-     * @param WP_Puller_Logger        $logger  Logger instance.
+     * @param WP_Puller_Updater    $updater    Package updater instance.
+     * @param WP_Puller_Logger     $logger     Logger instance.
+     * @param WP_Puller_GitHub_API $github_api GitHub API instance.
      */
-    public function __construct( $updater, $logger ) {
-        $this->updater = $updater;
-        $this->logger  = $logger;
+    public function __construct( $updater, $logger, $github_api ) {
+        $this->updater    = $updater;
+        $this->logger     = $logger;
+        $this->github_api = $github_api;
     }
 
     /**
@@ -182,7 +197,7 @@ class WP_Puller_Webhook_Handler {
     }
 
     /**
-     * Handle push event.
+     * Handle push event: update every matching package.
      *
      * @param array $payload Push event payload.
      * @return WP_REST_Response
@@ -190,81 +205,92 @@ class WP_Puller_Webhook_Handler {
     private function handle_push_event( $payload ) {
         $ref        = isset( $payload['ref'] ) ? $payload['ref'] : '';
         $pushed_branch = str_replace( 'refs/heads/', '', $ref );
-        $configured_branch = get_option( 'wp_puller_branch', 'main' );
+        $repo_full  = isset( $payload['repository']['full_name'] ) ? $payload['repository']['full_name'] : '';
 
-        if ( $pushed_branch !== $configured_branch ) {
-            $this->logger->log(
-                sprintf(
-                    /* translators: %1$s: pushed branch, %2$s: configured branch */
-                    __( 'Push to branch %1$s ignored (configured: %2$s)', 'wp-puller' ),
-                    $pushed_branch,
-                    $configured_branch
-                ),
-                WP_Puller_Logger::STATUS_INFO,
-                WP_Puller_Logger::SOURCE_WEBHOOK
-            );
-
-            return new WP_REST_Response(
-                array(
-                    'success' => true,
-                    'message' => 'Push to non-tracked branch ignored.',
-                ),
-                200
-            );
-        }
-
-        $auto_update = get_option( 'wp_puller_auto_update', true );
-
-        if ( ! $auto_update ) {
-            $this->logger->log(
-                __( 'Push received but auto-update is disabled', 'wp-puller' ),
-                WP_Puller_Logger::STATUS_INFO,
-                WP_Puller_Logger::SOURCE_WEBHOOK
-            );
-
-            return new WP_REST_Response(
-                array(
-                    'success' => true,
-                    'message' => 'Auto-update is disabled. Push notification logged.',
-                ),
-                200
-            );
-        }
-
-        $commit_sha = isset( $payload['after'] ) ? $payload['after'] : '';
-        $commit_msg = '';
-
-        if ( isset( $payload['head_commit']['message'] ) ) {
-            $commit_msg = $payload['head_commit']['message'];
-        }
-
-        $this->logger->log(
-            sprintf(
-                /* translators: %1$s: short commit SHA, %2$s: commit message excerpt */
-                __( 'Processing push: %1$s - %2$s', 'wp-puller' ),
-                substr( $commit_sha, 0, 7 ),
-                substr( $commit_msg, 0, 50 )
-            ),
-            WP_Puller_Logger::STATUS_INFO,
-            WP_Puller_Logger::SOURCE_WEBHOOK
-        );
-
-        $result = $this->updater->update( WP_Puller_Logger::SOURCE_WEBHOOK );
-
-        if ( is_wp_error( $result ) ) {
+        if ( empty( $repo_full ) ) {
             return new WP_REST_Response(
                 array(
                     'success' => false,
-                    'message' => $result->get_error_message(),
+                    'message' => 'Push payload missing repository information.',
                 ),
-                500
+                400
             );
+        }
+
+        $updated = 0;
+        $skipped = 0;
+
+        foreach ( WP_Puller::get_packages() as $pkg ) {
+            $parsed = $this->github_api->parse_repo_url( $pkg['repo_url'] );
+
+            if ( ! $parsed ) {
+                continue;
+            }
+
+            $pkg_full = $parsed['owner'] . '/' . $parsed['repo'];
+
+            if ( $pkg_full !== $repo_full ) {
+                continue;
+            }
+
+            if ( $pushed_branch !== $pkg['branch'] ) {
+                $skipped++;
+                $this->logger->log(
+                    sprintf(
+                        /* translators: %1$s: pushed branch, %2$s: configured branch */
+                        __( 'Push to branch %1$s ignored for package "%2$s" (configured: %3$s)', 'wp-puller' ),
+                        $pushed_branch,
+                        $pkg['label'] ?: $pkg['repo_url'],
+                        $pkg['branch']
+                    ),
+                    WP_Puller_Logger::STATUS_INFO,
+                    WP_Puller_Logger::SOURCE_WEBHOOK
+                );
+                continue;
+            }
+
+            if ( empty( $pkg['auto_update'] ) ) {
+                $skipped++;
+                $this->logger->log(
+                    sprintf(
+                        /* translators: %s: package label */
+                        __( 'Push received for "%s" but auto-update is disabled', 'wp-puller' ),
+                        $pkg['label'] ?: $pkg['repo_url']
+                    ),
+                    WP_Puller_Logger::STATUS_INFO,
+                    WP_Puller_Logger::SOURCE_WEBHOOK
+                );
+                continue;
+            }
+
+            $result = $this->updater->update_package( $pkg, WP_Puller_Logger::SOURCE_WEBHOOK );
+
+            if ( is_wp_error( $result ) ) {
+                $skipped++;
+                $this->logger->log(
+                    sprintf(
+                        /* translators: %1$s: package label, %2$s: error */
+                        __( 'Update failed for "%1$s": %2$s', 'wp-puller' ),
+                        $pkg['label'] ?: $pkg['repo_url'],
+                        $result->get_error_message()
+                    ),
+                    WP_Puller_Logger::STATUS_ERROR,
+                    WP_Puller_Logger::SOURCE_WEBHOOK
+                );
+            } else {
+                $updated++;
+            }
         }
 
         return new WP_REST_Response(
             array(
                 'success' => true,
-                'message' => 'Theme updated successfully.',
+                'message' => sprintf(
+                    /* translators: %1$d: updated count, %2$d: skipped count */
+                    __( 'Processed push: %1$d package(s) updated, %2$d skipped.', 'wp-puller' ),
+                    $updated,
+                    $skipped
+                ),
             ),
             200
         );
@@ -278,9 +304,6 @@ class WP_Puller_Webhook_Handler {
      * @return bool True if within limit, false if exceeded.
      */
     private function check_rate_limit() {
-        // Resolve the real client IP behind trusted reverse proxies / CDNs
-        // (Cloudflare, Sucuri, a site's own nginx, etc.) so the limit tracks
-        // the actual caller rather than a shared proxy address.
         $ip = WP_Puller_Client_IP::get();
 
         if ( empty( $ip ) ) {
@@ -294,29 +317,41 @@ class WP_Puller_Webhook_Handler {
             return false;
         }
 
-        // Increment counter; start a fresh 60-second window on first request.
         set_transient( $transient_key, $count + 1, 60 );
 
         return true;
     }
 
     /**
-     * Verify GitHub webhook signature.
+     * Verify a GitHub webhook signature against the global and per-package secrets.
      *
      * @param string $payload   Request body.
      * @param string $signature Signature header value.
      * @return bool
      */
     private function verify_signature( $payload, $signature ) {
-        $secret = self::get_secret();
+        $secrets = array();
 
-        if ( empty( $secret ) ) {
-            return false;
+        $global = WP_Puller::decrypt( get_option( 'wp_puller_webhook_secret', '' ) );
+        if ( ! empty( $global ) ) {
+            $secrets[] = $global;
         }
 
-        $expected = 'sha256=' . hash_hmac( 'sha256', $payload, $secret );
+        foreach ( WP_Puller::get_packages() as $pkg ) {
+            $secret = WP_Puller::get_effective_webhook_secret( $pkg );
+            if ( ! empty( $secret ) ) {
+                $secrets[] = $secret;
+            }
+        }
 
-        return hash_equals( $expected, $signature );
+        foreach ( array_unique( $secrets ) as $secret ) {
+            $expected = 'sha256=' . hash_hmac( 'sha256', $payload, $secret );
+            if ( hash_equals( $expected, $signature ) ) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -329,7 +364,7 @@ class WP_Puller_Webhook_Handler {
     }
 
     /**
-     * Get the plaintext webhook secret.
+     * Get the global plaintext webhook secret.
      *
      * The secret is stored encrypted at rest using WordPress salt-derived
      * encryption (see WP_Puller::encrypt). Legacy installs stored it in
@@ -345,23 +380,17 @@ class WP_Puller_Webhook_Handler {
             return '';
         }
 
-        // Encrypted values carry the WP_Puller::encrypt() version prefix.
         if ( 0 === strpos( $stored, 'v2:' ) ) {
             return WP_Puller::decrypt( $stored );
         }
 
-        // Legacy plaintext secret.
         return $stored;
     }
 
     /**
-     * Store a webhook secret, encrypting it at rest.
-     *
-     * Falls back to plaintext only if encryption is unavailable, so the secret
-     * is never lost.
+     * Store the global webhook secret, encrypting it at rest.
      *
      * @param string $plain Plaintext secret.
-     * @return void
      */
     public static function store_secret( $plain ) {
         $encrypted = WP_Puller::encrypt( $plain );
@@ -369,15 +398,13 @@ class WP_Puller_Webhook_Handler {
     }
 
     /**
-     * Get webhook configuration instructions.
+     * Get webhook configuration instructions (global).
      *
      * @return array
      */
     public static function get_setup_instructions() {
         $webhook_url = self::get_webhook_url();
 
-        // Upgrade a legacy plaintext secret to encrypted-at-rest the first
-        // time an admin views this page, then read it back decrypted.
         $raw = get_option( 'wp_puller_webhook_secret', '' );
         if ( '' !== $raw && 0 !== strpos( $raw, 'v2:' ) ) {
             self::store_secret( $raw );
